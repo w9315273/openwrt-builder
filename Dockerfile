@@ -1,8 +1,5 @@
 FROM ubuntu:24.04
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential clang flex bison gawk \
     git gettext libncurses-dev libssl-dev \
@@ -11,9 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libelf-dev zlib1g-dev libpam0g-dev libssh-dev \
     swig qemu-utils ccache curl ca-certificates jq \
     xz-utils zstd zip time tzdata locales \
-    nodejs npm \
-  && rm -rf /var/lib/apt/lists/*
+    nodejs npm && \
+    locale-gen en_US.UTF-8 && \
+    update-locale LANG=en_US.UTF-8 && \
+    rm -rf /var/lib/apt/lists/*
 
-ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC
 
 CMD ["/bin/bash"]
