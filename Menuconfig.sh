@@ -3,7 +3,7 @@ set -euo pipefail
 
 
 # ========== 🔧 必须修改为宿主机实际路径 ===============
-WORKSPACE_HOST="PLEASE_SET_YOUR_WORKSPACE_PATH_HERE"
+WORKSPACE_HOST="/home/tk/workspace/openwrt-workspace"
 # ==================================================
 
 
@@ -56,7 +56,7 @@ start_temp_container() {
   docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   
   # 启动容器
-  if docker run -d \
+  if docker run -d --rm \
     --name "${CONTAINER_NAME}" \
     -v "${WORKSPACE_HOST}:${WORKSPACE}" \
     "${CONTAINER_IMAGE}" \
@@ -73,9 +73,8 @@ start_temp_container() {
 # 清理函数
 cleanup() {
   if [[ "$CONTAINER_STARTED_BY_SCRIPT" == "true" ]]; then
-    echo -e "\n${C_YELLOW}🔄 正在停止并删除临时容器...${C_RESET}"
+    echo -e "\n${C_YELLOW}🔄 正在停止临时容器...${C_RESET}"
     docker stop "${CONTAINER_NAME}" >/dev/null 2>&1 || true
-    docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
     echo -e "${C_GREEN}✅ 容器已清理${C_RESET}"
   fi
 }
