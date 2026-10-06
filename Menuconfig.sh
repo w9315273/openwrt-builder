@@ -56,7 +56,7 @@ start_temp_container() {
   docker rm "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   
   # 启动容器
-  if docker run -d --rm \
+  if docker run -d --rm --init \
     --name "${CONTAINER_NAME}" \
     -v "${WORKSPACE_HOST}:${WORKSPACE}" \
     "${CONTAINER_IMAGE}" \
