@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential clang flex bison gawk \
     git gettext libncurses-dev libssl-dev \
     python3 python3-pip python3-setuptools python3-wheel \
-    rsync unzip file wget \
+    rsync unzip file wget openssh-client \
     libelf-dev zlib1g-dev libpam0g-dev libssh-dev \
     swig qemu-utils ccache curl ca-certificates jq \
     xz-utils zstd zip time tzdata locales \
