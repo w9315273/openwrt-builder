@@ -1,12 +1,16 @@
 FROM ubuntu:26.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ENV TZ=UTC
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential clang flex bison gawk \
     git gettext libncurses-dev libssl-dev \
     python3 python3-pip python3-setuptools python3-wheel \
     rsync unzip file wget openssh-client \
     libelf-dev zlib1g-dev libpam0g-dev libssh-dev \
     swig qemu-utils ccache curl ca-certificates jq \
+    bzip2 util-linux \
     xz-utils zstd zip time tzdata locales \
     nodejs npm && \
     locale-gen en_US.UTF-8 && \
@@ -14,8 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8 \
-    LC_ALL=en_US.UTF-8 \
-    DEBIAN_FRONTEND=noninteractive \
-    TZ=UTC
+    LC_ALL=en_US.UTF-8
 
 CMD ["/bin/bash"]
