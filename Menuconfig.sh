@@ -3,7 +3,7 @@ set -euo pipefail
 
 
 # ========== 🔧 必须修改为宿主机实际路径 ===============
-WORKSPACE_HOST="/home/tk/workspace/openwrt-workspace"
+WORKSPACE_HOST="/home/tk/work/openwrt-workspace"
 # ==================================================
 
 
@@ -11,6 +11,8 @@ WORKSPACE_HOST="/home/tk/workspace/openwrt-workspace"
 CONTAINER_NAME="Menuconfig"
 CONTAINER_IMAGE="ghcr.io/w9315273/openwrt-builder:latest"
 WORKSPACE="/openwrt-workspace"
+BUILD_UID="${BUILD_UID:-$(id -u)}"
+BUILD_GID="${BUILD_GID:-$(id -g)}"
 # ==============================
 
 C_RESET='\033[0m'
@@ -33,11 +35,13 @@ die() {
   exit 1
 }
 
+require docker || die "未找到 docker 命令"
+[[ -t 0 && -t 1 ]] || die "请在交互终端运行此脚本"
+
 # 启动临时容器
 start_temp_container() {
   if docker ps -q -f name="^${CONTAINER_NAME}$" 2>/dev/null | grep -q .; then
-    echo -e "${C_GREEN}✅ 容器已在运行${C_RESET}\n"
-    return 0
+    die "容器 ${CONTAINER_NAME} 已在运行, 请先结束已有配置会话"
   fi
   
   echo -e "${C_YELLOW}⏳ 正在启动临时容器...${C_RESET}"
@@ -58,6 +62,7 @@ start_temp_container() {
   # 启动容器
   if docker run -d --rm --init \
     --name "${CONTAINER_NAME}" \
+    --user "${BUILD_UID}:${BUILD_GID}" \
     -v "${WORKSPACE_HOST}:${WORKSPACE}" \
     "${CONTAINER_IMAGE}" \
     sleep infinity >/dev/null 2>&1; then
@@ -82,29 +87,35 @@ cleanup() {
 # 设置退出时清理
 trap cleanup EXIT
 
-# 1) 列出 <OWNER>/<REPO>
+# 只列出已经准备好固件源码的仓库, 跳过 SDK 工作区.
 list_repos() {
-  docker exec "${CONTAINER_NAME}" bash -lc "
-    shopt -s nullglob dotglob
-    cd '${WORKSPACE}' || exit 0
-    for d in */*; do
-      [ -d \"\$d\" ] && echo \"\${d%/}\"
+  docker exec "${CONTAINER_NAME}" bash -c '
+    set -euo pipefail
+    shopt -s nullglob
+    cd "$1"
+    for repo in */*; do
+      [[ -d "$repo" ]] || continue
+      for source in "$repo"/openwrt-*/source; do
+        if [[ -f "$source/Makefile" && -f "$source/scripts/diffconfig.sh" ]]; then
+          printf "%s\n" "$repo"
+          break
+        fi
+      done
     done
-  "
+  ' bash "$WORKSPACE"
 }
 
-# 2) 列出目录
 list_builds() {
-  local repo="$1"
-  docker exec "${CONTAINER_NAME}" bash -lc "
-    cd '${WORKSPACE}/${repo}' 2>/dev/null || exit 1
+  docker exec "${CONTAINER_NAME}" bash -c '
+    set -euo pipefail
     shopt -s nullglob
-    builds=( build-* )
-    if [ \${#builds[@]} -eq 0 ]; then
-      exit 1
-    fi
-    ls -1dt build-* 2>/dev/null
-  " 2>/dev/null
+    cd "$1/$2"
+    for build in openwrt-*; do
+      if [[ -f "$build/source/Makefile" && -f "$build/source/scripts/diffconfig.sh" ]]; then
+        printf "%s\n" "$build"
+      fi
+    done
+  ' bash "$WORKSPACE" "$1"
 }
 
 pick_one() {
@@ -127,7 +138,7 @@ pick_one() {
       continue
     fi
     
-    if ! (( idx>=1 && idx<=n )); then
+    if ! (( 10#$idx>=1 && 10#$idx<=n )); then
       echo -e "${C_RED}❌ 超出范围 (1-${n})${C_RESET}" >&2
       continue
     fi
@@ -135,12 +146,15 @@ pick_one() {
     break
   done
   
-  echo "${arr[$((idx-1))]}"
+  echo "${arr[$((10#$idx-1))]}"
 }
 
 echo -e "\n${C_BOLD}${C_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}"
 echo -e "${C_BOLD}  OpenWrt Menuconfig 配置工具${C_RESET}"
 echo -e "${C_BOLD}${C_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
+
+require docker || die "未找到 docker 命令"
+[[ -t 0 && -t 1 ]] || die "请在交互终端运行此脚本"
 
 # 启动临时容器
 start_temp_container
@@ -148,7 +162,9 @@ start_temp_container
 echo -e "${C_GRAY}🔎 容器: ${C_CYAN}${CONTAINER_NAME}${C_GRAY}   工作区: ${C_CYAN}${WORKSPACE_HOST}${C_RESET}\n"
 
 # 选择仓库
-mapfile -t repos < <(list_repos)
+repos_text="$(list_repos)" || die "读取工作区失败, 请检查挂载和构建用户 UID/GID"
+repos=()
+[[ -z "$repos_text" ]] || mapfile -t repos <<< "$repos_text"
 (( ${#repos[@]} > 0 )) || die "未在 ${WORKSPACE} 下找到任何 <OWNER>/<REPO>"
 
 echo -e "${C_BOLD}📦 请选择仓库:${C_RESET}"
@@ -158,13 +174,10 @@ echo -e "${C_GREEN}➡  已选择仓库: ${C_BOLD}${repo_sel}${C_RESET}\n"
 
 # 选择版本
 echo -e "${C_GRAY}🧬 正在查找可用版本...${C_RESET}"
-if ! mapfile -t builds < <(list_builds "${repo_sel}"); then
-  die "仓库 ${repo_sel} 下没有 build-* 目录, 请先跑过一次工作流"
-fi
-
-if (( ${#builds[@]} == 0 )); then
-  die "仓库 ${repo_sel} 下没有 build-* 目录, 请先跑过一次工作流"
-fi
+builds_text="$(list_builds "$repo_sel")" || die "读取仓库构建目录失败"
+builds=()
+[[ -z "$builds_text" ]] || mapfile -t builds <<< "$builds_text"
+(( ${#builds[@]} > 0 )) || die "仓库 ${repo_sel} 下没有可用的 openwrt-*/source, 请先运行一次工作流"
 
 echo -e "${C_BOLD}🧬 请选择版本:${C_RESET}"
 build_sel="$(pick_one "${builds[@]}")"
@@ -176,10 +189,17 @@ echo -e "${C_BOLD}${C_BLUE}━━━━━━━━━━━━━━━━━�
 echo -e "${C_BOLD}🛠  正在启动 Menuconfig...${C_RESET}"
 echo -e "${C_BOLD}${C_BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${C_RESET}\n"
 
-docker exec -it "${CONTAINER_NAME}" bash -lc "
+# 使用与源码准备相同的锁, 并在锁内保存本次配置快照.
+docker exec -it "${CONTAINER_NAME}" bash -c '
+  set -euo pipefail
   export TERM=xterm-256color
-  cd '${WORKSPACE}/${repo_sel}/${build_sel}' && make menuconfig
-"
+  base="$1/$2/$3"
+  exec 9>"$base/workspace.lock"
+  flock -n 9 || { echo "工作区正在使用, 请等待当前构建或配置操作结束" >&2; exit 1; }
+  cd "$base/source"
+  make menuconfig
+  ./scripts/diffconfig.sh > /tmp/diffconfig
+' bash "$WORKSPACE" "$repo_sel" "$build_sel"
 
 # 询问是否导出 diffconfig
 echo -e "\n${C_BOLD}${C_YELLOW}❓ 是否导出 diffconfig?${C_RESET}"
@@ -197,7 +217,7 @@ while true; do
     continue
   fi
   
-  if ! (( export_choice>=1 && export_choice<=2 )); then
+  if ! (( 10#$export_choice>=1 && 10#$export_choice<=2 )); then
     echo -e "${C_RED}❌ 超出范围 (1-2)${C_RESET}" >&2
     continue
   fi
@@ -205,17 +225,13 @@ while true; do
   break
 done
 
-if [[ "$export_choice" != "1" ]]; then
+if (( 10#$export_choice != 1 )); then
   echo -e "${C_GRAY}❕ 已跳过导出${C_RESET}\n"
   exit 0
 fi
 
-# 导出 diffconfig 到容器 /tmp 再拷回本机
+# 导出锁内生成的配置快照, 避免读取后续构建改写的 .config.
 echo -e "\n${C_YELLOW}📝 正在导出 diffconfig...${C_RESET}"
-docker exec "${CONTAINER_NAME}" bash -lc "
-  cd '${WORKSPACE}/${repo_sel}/${build_sel}' &&
-  ./scripts/diffconfig.sh > /tmp/diffconfig
-"
 
 # 目标文件名: 避免覆盖, 加上 repo 与 tag
 ts="$(date +%Y%m%d-%H%M%S)"
